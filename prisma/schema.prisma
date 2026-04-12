@@ -1,0 +1,565 @@
+// Prisma schema for Calma Eco
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  emailVerified DateTime?
+  passwordHash  String?
+  currency      String    @default("EUR")
+  timezone      String    @default("Europe/Madrid")
+  defaultBudget Int       @default(0)
+  defaultIncome Int       @default(0)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  months                  Month[]
+  fixedExpenses           FixedExpense[]
+  fixedBudgets            FixedBudget[]
+  expenses                Expense[]
+  categoryBudgets         CategoryBudget[]
+  monthFixedExpenses      MonthFixedExpense[]
+  bankConnections         BankConnection[]
+  expenseSuggestions      ExpenseSuggestion[]
+  savingsRule             SavingsRule?
+  goals                   Goal[]
+  savingsAccount          SavingsAccount?
+  investmentAccount       InvestmentAccount?
+  savingsTransactions     SavingsTransaction[]
+  investmentTransactions  InvestmentTransaction[]
+  investmentPlans         InvestmentPlan[]
+  investmentHoldings      InvestmentHolding[]
+  investmentContributions InvestmentContribution[]
+  classificationRules     ClassificationRule[]
+  notifications           Notification[]
+  notificationPreferences NotificationPreference[]
+  achievements            UserAchievement[]
+  pushSubscriptions       PushSubscription[]
+  jobRunItems             JobRunItem[]
+  accounts                Account[]
+  sessions                Session[]
+  resetTokens             PasswordResetToken[]
+}
+
+model Month {
+  id        String   @id @default(cuid())
+  userId    String
+  yearMonth String
+  budget    Int      @default(0)
+  income    Int      @default(0)
+  carryOver Int      @default(0)
+  createdAt DateTime @default(now())
+
+  user           User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expenses       Expense[]
+  fixedSnapshots MonthFixedExpense[]
+
+  @@unique([userId, yearMonth])
+  @@index([userId, yearMonth])
+}
+
+model MonthFixedExpense {
+  id         String   @id @default(cuid())
+  userId     String
+  monthId    String
+  name       String
+  amount     Int
+  category   String
+  dayOfMonth Int?
+  active     Boolean  @default(true)
+  createdAt  DateTime @default(now())
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  month Month @relation(fields: [monthId], references: [id], onDelete: Cascade)
+
+  @@unique([monthId, name])
+  @@index([userId, monthId])
+  @@index([monthId])
+}
+
+model FixedExpense {
+  id         String   @id @default(cuid())
+  userId     String
+  name       String
+  amount     Int
+  category   String
+  dayOfMonth Int?
+  active     Boolean  @default(true)
+  createdAt  DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, name])
+  @@index([userId])
+}
+
+model FixedBudget {
+  id          String   @id @default(cuid())
+  userId      String
+  category    String
+  limitAmount Int
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, category])
+  @@index([userId])
+}
+
+model Expense {
+  id         String      @id @default(cuid())
+  userId     String
+  monthId    String
+  date       DateTime
+  name       String
+  amount     Int
+  category   String
+  importance Importance?
+  notes      String?
+  createdAt  DateTime    @default(now())
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  month Month @relation(fields: [monthId], references: [id], onDelete: Cascade)
+
+  @@index([userId, date])
+  @@index([monthId])
+}
+
+enum Importance {
+  VITAL
+  NEUTRO
+  SUPERFLUO
+}
+
+enum SuggestionStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+}
+
+model ExpenseSuggestion {
+  id         String           @id @default(cuid())
+  userId     String
+  date       DateTime
+  name       String
+  amount     Int
+  category   String
+  importance Importance       @default(NEUTRO)
+  notes      String?
+  source     String           @default("csv")
+  status     SuggestionStatus @default(PENDING)
+  createdAt  DateTime         @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status])
+}
+
+model BankConnection {
+  id           String    @id @default(cuid())
+  userId       String
+  provider     String
+  status       String    @default("pending")
+  state        String?
+  scope        String?
+  accessToken  String?
+  refreshToken String?
+  expiresAt    DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  user     User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accounts BankAccount[]
+
+  @@index([userId, provider])
+}
+
+model BankAccount {
+  id                String   @id @default(cuid())
+  connectionId      String
+  providerAccountId String
+  name              String
+  type              String?
+  currency          String?
+  createdAt         DateTime @default(now())
+
+  connection   BankConnection    @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  transactions BankTransaction[]
+
+  @@unique([connectionId, providerAccountId])
+}
+
+model BankTransaction {
+  id                    String   @id @default(cuid())
+  accountId             String
+  providerTransactionId String
+  date                  DateTime
+  description           String
+  amount                Int
+  currency              String?
+  createdAt             DateTime @default(now())
+
+  account BankAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([accountId, providerTransactionId])
+}
+
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String
+  token     String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model SavingsRule {
+  id         String   @id @default(cuid())
+  userId     String   @unique
+  savingsPct Int      @default(10)
+  investPct  Int      @default(10)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Goal {
+  id           String    @id @default(cuid())
+  userId       String
+  name         String
+  targetAmount Int
+  targetDate   DateTime?
+  priority     Int       @default(2)
+  status       String    @default("active")
+  createdAt    DateTime  @default(now())
+
+  user          User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  contributions GoalContribution[]
+
+  @@index([userId, status])
+}
+
+model GoalContribution {
+  id     String   @id @default(cuid())
+  goalId String
+  amount Int
+  date   DateTime @default(now())
+  note   String?
+  source String   @default("available")
+  type   String   @default("deposit")
+
+  goal Goal @relation(fields: [goalId], references: [id], onDelete: Cascade)
+
+  @@index([goalId])
+}
+
+model SavingsAccount {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  balance   Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model SavingsTransaction {
+  id     String   @id @default(cuid())
+  userId String
+  amount Int
+  date   DateTime @default(now())
+  note   String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, date])
+}
+
+model InvestmentAccount {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  balance   Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model InvestmentTransaction {
+  id     String   @id @default(cuid())
+  userId String
+  amount Int
+  date   DateTime @default(now())
+  note   String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, date])
+}
+
+model InvestmentPlan {
+  id                String   @id @default(cuid())
+  userId            String
+  name              String
+  type              String
+  targetAmount      Int?
+  riskLevel         String   @default("medio")
+  annualInterestPct Float?
+  currentValue      Int?
+  notes             String?
+  createdAt         DateTime @default(now())
+
+  user          User                     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  holdings      InvestmentHolding[]
+  contributions InvestmentContribution[]
+
+  @@index([userId])
+}
+
+enum InvestmentAssetKind {
+  STOCK
+  ETF
+  BOND
+  FUND
+  CRYPTO
+  PENSION
+  CASH
+  OTHER
+}
+
+model InvestmentHolding {
+  id         String              @id @default(cuid())
+  userId     String
+  planId     String?
+  kind       InvestmentAssetKind
+  name       String
+  symbol     String?
+  provider   String? // "stooq" | "coingecko" | null (manual)
+  providerId String? // e.g. coingecko id for crypto
+  quantity   Decimal             @db.Decimal(24, 8)
+  costBasis  Int                 @default(0) // total cost in cents (same currency as user)
+  createdAt  DateTime            @default(now())
+  updatedAt  DateTime            @updatedAt
+
+  user User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plan InvestmentPlan? @relation(fields: [planId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([planId])
+}
+
+model InvestmentContribution {
+  id        String   @id @default(cuid())
+  userId    String
+  planId    String
+  amount    Int
+  date      DateTime @default(now())
+  note      String?
+  createdAt DateTime @default(now())
+
+  user User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plan InvestmentPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  @@index([userId, date])
+  @@index([planId, date])
+}
+
+model Notification {
+  id        String    @id @default(cuid())
+  userId    String
+  type      String
+  severity  String    @default("info")
+  title     String
+  body      String
+  data      Json?
+  dedupeKey String
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, dedupeKey])
+  @@index([userId, createdAt])
+  @@index([userId, readAt])
+}
+
+model NotificationPreference {
+  id        String   @id @default(cuid())
+  userId    String
+  type      String
+  channel   String
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, type, channel])
+  @@index([userId])
+}
+
+model UserAchievement {
+  id         String   @id @default(cuid())
+  userId     String
+  key        String
+  unlockedAt DateTime @default(now())
+  meta       Json?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, key])
+  @@index([userId])
+}
+
+model PushSubscription {
+  id        String   @id @default(cuid())
+  userId    String
+  endpoint  String
+  endpointHash String
+  p256dh    String
+  auth      String
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, endpointHash])
+  @@index([userId])
+}
+
+enum JobRunType {
+  WEEKLY_SUMMARY
+}
+
+enum JobRunStatus {
+  RUNNING
+  SUCCESS
+  PARTIAL
+  FAILED
+  DEGRADED
+}
+
+enum JobRunItemStatus {
+  SENT
+  SKIPPED
+  FAILED
+  TIMED_OUT
+}
+
+model JobRun {
+  id        String       @id @default(cuid())
+  type      JobRunType
+  status    JobRunStatus @default(RUNNING)
+  requestId String?
+  startedAt DateTime     @default(now())
+  endedAt   DateTime?
+  metrics   Json?
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  items JobRunItem[]
+
+  @@index([type, startedAt])
+  @@index([status, startedAt])
+}
+
+model JobRunItem {
+  id         String           @id @default(cuid())
+  runId      String
+  userId     String?
+  status     JobRunItemStatus
+  attempts   Int              @default(1)
+  durationMs Int?
+  error      String?
+  createdAt  DateTime         @default(now())
+
+  run  JobRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  user User?  @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([runId, status])
+  @@index([userId])
+}
+
+model ClassificationRule {
+  id         String     @id @default(cuid())
+  userId     String
+  pattern    String
+  category   String
+  isFixed    Boolean    @default(false)
+  importance Importance @default(NEUTRO)
+  createdAt  DateTime   @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model CategoryBudget {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  category String // Nombre de la categoría
+  budget   Int // Presupuesto mensual en centavos
+
+  yearMonth String // "2024-02" para tracking mensual
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, category, yearMonth])
+  @@index([userId, yearMonth])
+}

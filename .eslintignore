@@ -1,0 +1,8 @@
+node_modules
+.next
+public/sw.js
+public/push-sw.js
+public/workbox-*.js
+tmp-swc-extract
+tmp-swc-*.tgz
+tsconfig.tsbuildinfo
