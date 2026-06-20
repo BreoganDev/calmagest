@@ -1,17 +1,12 @@
 import { auth } from '@/auth';
 import { prisma } from '@/lib/prisma';
+import { parseBankAmountToCents, parseBankDate, parseCsv } from '@/lib/services/bankCsvImport';
 import { classifyWithUserRules } from '@/lib/services/classifierServer';
 import { getRequestId, jsonWithRequestId } from '@/lib/server/request-context';
+import { createHash } from 'crypto';
 
-function parseCsv(text: string) {
-  const lines = text.split(/\r?\n/).filter(Boolean);
-  if (lines.length <= 1) return [];
-  const header = lines[0];
-  const separator = header.includes(';') ? ';' : ',';
-  const rows = lines.slice(1).map((line) =>
-    line.split(separator).map((cell) => cell.replace(/^"|"$/g, '').replace(/""/g, '"'))
-  );
-  return rows;
+function dedupeKey(userId: string, dateStr: string, description: string, amount: number): string {
+  return createHash('sha256').update(`${userId}:${dateStr}:${description}:${amount}`).digest('hex').slice(0, 32);
 }
 
 export async function POST(request: Request) {
@@ -21,84 +16,52 @@ export async function POST(request: Request) {
     return jsonWithRequestId({ message: 'Unauthorized' }, requestId, { status: 401 });
   }
 
-  const body = await request.text();
-  if (!body) return jsonWithRequestId({ message: 'CSV vacio' }, requestId, { status: 400 });
+  const url = new URL(request.url);
+  const dateCol = Math.max(0, Number(url.searchParams.get('dateCol') ?? 0));
+  const descCol = Math.max(0, Number(url.searchParams.get('descCol') ?? 1));
+  const amountCol = Math.max(0, Number(url.searchParams.get('amountCol') ?? 2));
 
-  const rows = parseCsv(body);
+  const body = await request.text();
+  if (!body) return jsonWithRequestId({ message: 'CSV vacío' }, requestId, { status: 400 });
+
+  const rows = parseCsv(body, dateCol, descCol, amountCol);
   if (rows.length === 0) return jsonWithRequestId({ message: 'CSV sin datos' }, requestId, { status: 400 });
 
-  const connection = await prisma.bankConnection.findFirst({
-    where: { userId: session.user.id, provider: 'csv', status: 'active' }
-  });
+  let imported = 0;
+  let skipped = 0;
+  let duplicates = 0;
 
-  const conn =
-    connection ??
-    (await prisma.bankConnection.create({
-      data: {
-        userId: session.user.id,
-        provider: 'csv',
-        status: 'active'
-      }
-    }));
+  for (const { dateStr, description, amountStr } of rows) {
+    const date = parseBankDate(dateStr);
+    if (!description || !date || Number.isNaN(date.getTime())) { skipped++; continue; }
 
-  const account = await prisma.bankAccount.upsert({
-    where: {
-      connectionId_providerAccountId: {
-        connectionId: conn.id,
-        providerAccountId: 'csv-default'
-      }
-    },
-    update: { name: 'Import CSV', type: 'csv' },
-    create: { connectionId: conn.id, providerAccountId: 'csv-default', name: 'Import CSV', type: 'csv' }
-  });
+    const amount = parseBankAmountToCents(amountStr);
+    if (Number.isNaN(amount)) { skipped++; continue; }
 
-  for (const row of rows) {
-    const [dateStr, description, amountStr] = row;
-    const date = new Date(dateStr);
-    if (!description || Number.isNaN(date.getTime())) continue;
+    const key = dedupeKey(session.user.id, dateStr, description, amount);
 
-    const amount = Math.round(Number(String(amountStr).replace(',', '.')) * 100);
-    if (Number.isNaN(amount)) continue;
+    const existing = await prisma.expenseSuggestion.findFirst({
+      where: { userId: session.user.id, notes: key }
+    });
+    if (existing) { duplicates++; continue; }
 
-    const providerTransactionId = `${dateStr}-${description}-${amount}`.slice(0, 190);
     const suggestion = await classifyWithUserRules(session.user.id, description);
 
-    await prisma.bankTransaction.upsert({
-      where: {
-        accountId_providerTransactionId: {
-          accountId: account.id,
-          providerTransactionId
-        }
-      },
-      update: {
-        description,
-        amount,
-        currency: 'EUR',
-        date
-      },
-      create: {
-        accountId: account.id,
-        providerTransactionId,
-        description,
-        amount,
-        currency: 'EUR',
-        date
-      }
-    });
-
-    const normalizedAmount = Math.abs(amount);
     await prisma.expenseSuggestion.create({
       data: {
         userId: session.user.id,
         date,
         name: description,
-        amount: normalizedAmount,
-        category: suggestion?.category ?? 'Variable',
+        amount: Math.abs(amount),
+        category: suggestion?.category ?? 'Otros',
         importance: suggestion?.importance ?? 'NEUTRO',
-        source: 'csv'
+        source: 'csv',
+        notes: key
       }
     });
+
+    imported++;
   }
 
-  return jsonWithRequestId({ ok: true }, requestId);
+  return jsonWithRequestId({ ok: true, imported, skipped, duplicates }, requestId);
 }
